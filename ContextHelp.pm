@@ -1,10 +1,10 @@
 # -*- perl -*-
 
 #
-# $Id: ContextHelp.pm,v 1.10 1998/08/26 15:34:44 eserte Exp eserte $
+# $Id: ContextHelp.pm,v 1.14 2000/09/13 22:27:05 eserte Exp $
 # Author: Slaven Rezic
 #
-# Copyright (c) 1998 Slaven Rezic. All rights reserved.
+# Copyright (c) 1998,2000 Slaven Rezic. All rights reserved.
 # This package is free software; you can redistribute it and/or
 # modify it under the same terms as Perl itself.
 #
@@ -19,7 +19,7 @@ BEGIN { die "Tk::ContextHelp does not work with Win32" if $^O eq 'MSWin32' }
 use Tk::InputO;
 use strict;
 use vars qw($VERSION @ISA);
-$VERSION = '0.06';
+$VERSION = '0.08';
 @ISA = qw(Tk::Toplevel);
 
 Construct Tk::Widget 'ContextHelp';
@@ -27,34 +27,31 @@ Construct Tk::Widget 'ContextHelp';
 sub Populate {
     my($w, $args) = @_;
     $w->SUPER::Populate($args);
-    
+
     $w->overrideredirect(1);
     $w->withdraw;
     $w->bind('<Button-1>' => [ $w, '_next_action']);
     $w->bind('<Button-2>' => [ $w, 'deactivate']);
     $w->bind('<Button-3>' => [ $w, 'deactivate']);
-    
+
     my $widget = delete $args->{'-widget'} || 'Label';
     $w->{'label'} = $w->$widget()->pack;
     $w->{'clients'} = [];
     $w->{'inp_only_clients'} = [];
     $w->{'state'} = 'withdrawn';
 
-    my $key = delete $args->{'-helpkey'}; # XXX ConfigSpecs, specify Key?
-    if (defined $key) {
-	$key = '<F1>' if $key !~ /^<.*>$/;
-	$w->parent->toplevel->bind($key => sub { $w->_key_help });
-    }
-
     $w->{'inp_only'} = $w->parent->InputO(-cursor => 'watch');
     $w->{'inp_only'}->bind('<Button-1>' => [ $w, '_next_action']);
     $w->{'inp_only'}->bind('<Button-2>' => [ $w, 'deactivate']);
     $w->{'inp_only'}->bind('<Button-3>' => [ $w, 'deactivate']);
-    
+
     $w->ConfigSpecs
-      (-installcolormap => ["PASSIVE", "installColormap", "InstallColormap", 0],
-       -background      => [$w->{'label'}, "background", "Background", "#C0C080"],
-       -font            => [$w->{'label'}, "font", "Font", "-*-helvetica-medium-r-normal--*-120-*-*-*-*-*-*"],
+      (-installcolormap => ["PASSIVE", "installColormap", "InstallColormap",
+			    0],
+       -background      => [$w->{'label'}, "background", "Background",
+			    "#C0C080"],
+       -font            => [$w->{'label'}, "font", "Font",
+			    "-*-helvetica-medium-r-normal--*-120-*-*-*-*-*-*"],
        -borderwidth     => ["SELF", "borderWidth", "BorderWidth", 1],
        '-podfile'       => ["METHOD", "podFile", "PodFile", $0],
        -verbose         => ["PASSIVE", "verbose", "Verbose", 1],
@@ -68,6 +65,7 @@ sub Populate {
 			     'black', 'white']],
        -stayactive      => ["PASSIVE", "stayActive", "StayActive", 0],
        -callback        => ["CALLBACK", "callback", "Callback", undef],
+       -helpkey         => ["METHOD", "helpKey", "HelpKey", undef],
        DEFAULT          => [$w->{'label'}],
       );
 }
@@ -97,6 +95,8 @@ sub activate {
 	    $cw->configure(-cursor => $cursor);
 	    $cw->raise;
 	}
+	$w->{'old_esc_binding'} = $w->parent->toplevel->bind('<Escape>');
+	$w->parent->toplevel->bind('<Escape>' => [$w, 'deactivate']);
     } elsif ($state eq 'wait') {
 	$w->{'inp_only'}->place('-x' => 0, '-y' => 0,
 				-relwidth => 1.0, -relheight => 1.0,
@@ -163,7 +163,7 @@ sub _show_help {
 	$w->update;
 	$w->activate($w->cget(-stayactive) ? 'cont' : 'wait');
     };
-	
+
     # test underlying widget and its parents
     while(defined $under) {
 	if (exists $w->{'msg'}{$under}) {
@@ -185,6 +185,7 @@ sub _show_help {
 	    } else {
 		eval { require Tk::Pod };
 		if ($@) {
+		    # use SimplePod as fallback for Tk::Pod
 		    my $t = $parent->toplevel->CHSimplePod
 		      (-title => "POD: $podfile",
 		       -file => $podfile);
@@ -200,13 +201,14 @@ sub _show_help {
 		    $t->{'podfile'} = $podfile;
 		    $w->{'podwindow'} = $t;
 		} else {
-		    $parent->Busy;
+		    # use original Tk::Pod
+		    _busy($parent);
 		    eval {
 			$w->{'podwindow'}
 			= $parent->toplevel->Pod(-file => $podfile);
 		    };
 		    my $err = $@;
-		    $parent->Unbusy;
+		    _unbusy($parent);
 		    if ($err) {
 			undef $w->{'podwindow'};
 			$parent->bell;
@@ -300,6 +302,10 @@ sub _reset {
 sub deactivate {
     my($w) = @_;
     $w->_reset;
+    if ($w->{'old_esc_binding'}) {
+	$w->parent->toplevel->bind("<Escape>" => $w->{'old_esc_binding'});
+	delete $w->{'old_esc_binding'};
+    }
     $w->cget(-callback)->Call($w) if $w->cget(-callback);
 }
 
@@ -333,8 +339,6 @@ sub attach {
     $inputo->bind('<Button-1>' => [$w, '_active_state', $inputo]);
     $inputo->bind('<Button-2>' => [$w, 'deactivate']);
     $inputo->bind('<Button-3>' => [$w, 'deactivate']);
-    #$inputo->bind('<Escape>'   => [$w, 'deactivate']);
-    #$inputo->bind('<Key>'      => [$w, 'deactivate']); # XXX InputO does not receive any Key events?!
     $client->OnDestroy([$w, 'detach', $client]);
 }
 
@@ -365,6 +369,19 @@ sub podfile {
     }
 }
 
+sub helpkey {
+    my $w = shift;
+    if (@_ > 0) {
+	my $key = shift;
+	if (defined $key) {
+	    $key = '<F1>' if $key !~ /^<.*>$/;
+	    $w->parent->toplevel->bind($key => sub { $w->_key_help });
+	}
+    } else {
+	$w->{Configure}{'helpkey'};
+    }
+}
+
 sub HelpButton {
     my($w, $top, %args) = @_;
     my $b;
@@ -374,10 +391,12 @@ sub HelpButton {
 			    $w->toggle;
 			};
     my $change_button_state = sub {
-	if ($w->{'state'} ne 'withdrawn') {
+	if ($w->{'state'} ne 'withdrawn' &&
+	    $w->{'state'} ne 'wait') {
+	    $w->{'oldrelief'} = $b->cget(-relief);
 	    $b->configure(-relief => 'sunken');
 	} else {
-	    $b->configure(-relief => 'raised');
+	    $b->configure(-relief => $w->{'oldrelief'} || 'raised');
 	}
     };
     $w->configure(-callback => $change_button_state);
@@ -387,6 +406,25 @@ sub HelpButton {
 				   $w->toggle;
 			       });
     $b;
+}
+
+# XXX Problems with -recurse and SimplePod => disabling for now
+sub _busy {
+    my $w = shift;
+    if (1 || $Tk::VERSION < 800.012) {
+	$w->Busy;
+    } else {
+	$w->Busy(-recurse => 1);
+    }
+}
+
+sub _unbusy {
+    my $w = shift;
+    if (1 || $Tk::VERSION < 800.012) {
+	$w->Unbusy;
+    } else {
+	$w->Unbusy(-recurse => 1);
+    }
 }
 
 package Tk::ContextHelp::SimplePod;
@@ -405,7 +443,7 @@ sub Populate {
     my $t = $w->Scrolled('ROText',
 			 -scrollbars => 'osoe')->pack(-fill => 'both');
     $w->Advertise('text' => $t);
-		  
+
     $w->ConfigSpecs(-file => ["METHOD", "podfile", "Podfile", undef]);
 }
 
@@ -413,13 +451,24 @@ sub file {
     my $w = shift;
     if (@_) {
 	my $file = shift;
-	$w->Busy;
+	Tk::ContextHelp::_busy($w->parent->toplevel);
 	eval {
 	    my $pid = open(POD, "-|");
 	    if (!$pid) {
-		# I think this is a bad idea when mixing
-		# perl versions:
-		#$ENV{PERL5LIB} = join(":", $ENV{PERL5LIB}, @INC);
+		local($^W) = 0;
+		{
+		    # I think it's a bad idea when mixing
+		    # perl versions, so make this local for just this
+		    # call of perldoc, which has the same version as the
+		    # calling program
+		    local $ENV{PERL5LIB} = join(":", $ENV{PERL5LIB}, @INC);
+		    require Config;
+		    my $perldocpath = "$Config::Config{installscript}/perldoc";
+		    if (-x $perldocpath) {
+			exec $^X, $perldocpath, '-t', $file;
+			# Can't execute ... try next one
+		    }
+		}
 		exec 'perldoc', '-t', $file;
 		# Don't use die, but rather CORE::exit,
 		# which is safer.
@@ -434,7 +483,7 @@ sub file {
 	    }
 	};
 	my $err = $@;
-	$w->Unbusy;
+	Tk::ContextHelp::_unbusy($w->parent->toplevel);
 	if ($err) {
 	    warn $err;
 	    $w->{File} = undef;
@@ -490,7 +539,8 @@ question mark.
 
 =item B<-helpkey>
 
-Enable use of a help key. A common choice would be "F1".
+Enable use of a help key. A common choice would be "F1" (or written as
+"<F1>") or maybe "<Help>", if your keyboard has a help key.
 
 =item B<-offcursor>
 
@@ -538,7 +588,11 @@ The argument is the message to be shown in a popup window.
 
 =item B<-pod>
 
-The argument is a regular expression to jump in the corresponding pod file.
+The argument is a regular expression to jump in the corresponding pod
+file. For example, if you have a topic DESCRIPTION where you want to
+jump to, you can specify
+
+    $contexthelp->attach($widget, -pod => '^\s*DESCRIPTION');
 
 =item B<-podfile>
 
@@ -600,6 +654,12 @@ not-attached widgets while in context mode)
 
 =back
 
+=head1 TODO
+
+ * optional use of html browsers (netscape -remote openURL ...)
+
+ * on Win32, make InputO work and use the native help system
+
 =head1 AUTHOR
 
 Slaven Rezic <F<eserte@cs.tu-berlin.de>>
@@ -607,7 +667,7 @@ Slaven Rezic <F<eserte@cs.tu-berlin.de>>
 Some code and documentation is derived from Rajappa Iyer's
 B<Tk::Balloon>.
 
-Copyright (c) 1998 Slaven Rezic. All rights reserved.
+Copyright (c) 1998,2000 Slaven Rezic. All rights reserved.
 This package is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself.
 
