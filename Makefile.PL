@@ -13,6 +13,16 @@ WriteMakefile
     'context_nohelp_mask.xbm' => '$(INST_LIBDIR)/context_nohelp_mask.xbm',
    },
    'PREREQ_PM'  => {'Tk'             => 402.002,
-		    #'Tk::Pod'        => 0.4, # optional
+		    'Tk::Pod'        => 4, # really only optional
 		   },
   );
+
+sub MY::postamble {
+    if (defined $ENV{USER} && $ENV{USER} eq 'eserte') {
+	<<'EOF';
+release :: $(DISTVNAME).tar$(SUFFIX)
+	cpan-upload $(DISTVNAME).tar$(SUFFIX)
+
+EOF
+    }
+}
