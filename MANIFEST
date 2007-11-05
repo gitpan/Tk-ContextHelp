@@ -6,6 +6,5 @@ context_nohelp.xbm
 context_nohelp_mask.xbm
 MANIFEST
 Makefile.PL
-test.pl
 README
-META.yml                                 Module meta-data (added by MakeMaker)
+t/tk-contexthelp.t
